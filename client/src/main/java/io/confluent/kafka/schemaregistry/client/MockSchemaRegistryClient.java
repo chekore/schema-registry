@@ -16,10 +16,13 @@
 
 package io.confluent.kafka.schemaregistry.client;
 
+import io.confluent.kafka.schemaregistry.avro.AvroCompatibilityLevel;
+import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
 import org.apache.avro.Schema;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -27,9 +30,6 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import io.confluent.kafka.schemaregistry.avro.AvroCompatibilityLevel;
-import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
 
 /**
  * Mock implementation of SchemaRegistryClient that can be used for tests. This version is NOT
@@ -39,6 +39,7 @@ public class MockSchemaRegistryClient implements SchemaRegistryClient {
 
   private String defaultCompatibility = "BACKWARD";
   private final Map<String, Map<Schema, Integer>> schemaCache;
+  private final Map<Schema, Integer> schemaIdCache;
   private final Map<String, Map<Integer, Schema>> idCache;
   private final Map<String, Map<Schema, Integer>> versionCache;
   private final Map<String, String> compatibilityCache;
@@ -46,6 +47,7 @@ public class MockSchemaRegistryClient implements SchemaRegistryClient {
 
   public MockSchemaRegistryClient() {
     schemaCache = new HashMap<String, Map<Schema, Integer>>();
+    schemaIdCache = new HashMap<>();
     idCache = new HashMap<String, Map<Integer, Schema>>();
     versionCache = new HashMap<String, Map<Schema, Integer>>();
     compatibilityCache = new HashMap<String, String>();
@@ -70,7 +72,11 @@ public class MockSchemaRegistryClient implements SchemaRegistryClient {
       idSchemaMap = new HashMap<Integer, Schema>();
     }
     if (registerRequest) {
-      int id = ids.incrementAndGet();
+      Integer id = schemaIdCache.get(schema);
+      if (id == null) {
+        id = ids.incrementAndGet();
+        schemaIdCache.put(schema, id);
+      }
       idSchemaMap.put(id, schema);
       idCache.put(subject, idSchemaMap);
       generateVersion(subject, schema);
@@ -131,7 +137,13 @@ public class MockSchemaRegistryClient implements SchemaRegistryClient {
     } else {
       int id = getIdFromRegistry(subject, schema, true);
       schemaIdMap.put(schema, id);
-      idCache.get(null).put(id, schema);
+      if (!idCache.get(null).containsKey(id)) {
+        // CachedSchema Registry client would have a cached version of schema instance for
+        // each schema. You could also get the schema without using a subject and to cover that we
+        // need to add an entry with null subject
+        Schema.Parser parser = new Schema.Parser();
+        idCache.get(null).put(id, parser.parse(schema.toString()));
+      }
       return id;
     }
   }
@@ -272,5 +284,40 @@ public class MockSchemaRegistryClient implements SchemaRegistryClient {
   @Override
   public int getId(String subject, Schema schema) throws IOException, RestClientException {
     return getIdFromRegistry(subject, schema, false);
+  }
+
+  @Override
+  public List<Integer> deleteSubject(String subject) throws IOException, RestClientException {
+    return deleteSubject(null, subject);
+  }
+
+  @Override
+  public List<Integer> deleteSubject(
+      Map<String, String> requestProperties,
+      String subject)
+      throws IOException, RestClientException {
+    schemaCache.remove(subject);
+    versionCache.remove(subject);
+    compatibilityCache.remove(subject);
+    return Arrays.asList(0);
+  }
+
+  @Override
+  public Integer deleteSchemaVersion(String subject, String version)
+      throws IOException, RestClientException {
+    return deleteSchemaVersion(null, subject, version);
+  }
+
+  @Override
+  public Integer deleteSchemaVersion(
+      Map<String, String> requestProperties,
+      String subject,
+      String version)
+      throws IOException, RestClientException {
+    if (versionCache.containsKey(subject)) {
+      versionCache.get(subject).values().remove(Integer.valueOf(version));
+      return 0;
+    }
+    return -1;
   }
 }

@@ -87,6 +87,7 @@ public class KafkaSchemaRegistry implements SchemaRegistry, MasterAwareSchemaReg
   private final SchemaRegistryConfig config;
   final Map<Integer, SchemaKey> guidToSchemaKey;
   final Map<MD5, SchemaIdAndSubjects> schemaHashToGuid;
+  final Map<Integer, List<SchemaKey>> guidToDeletedSchemaKeys;
   private final KafkaStore<SchemaRegistryKey, SchemaRegistryValue> kafkaStore;
   private final Serializer<SchemaRegistryKey, SchemaRegistryValue> serializer;
   private final SchemaRegistryIdentity myIdentity;
@@ -122,7 +123,7 @@ public class KafkaSchemaRegistry implements SchemaRegistry, MasterAwareSchemaReg
     SchemeAndPort schemeAndPort = getSchemeAndPortForIdentity(
         config.getInt(SchemaRegistryConfig.PORT_CONFIG),
         config.getList(RestConfig.LISTENERS_CONFIG),
-        config.getString(SchemaRegistryConfig.SCHEMAREGISTRY_INTER_INSTANCE_PROTOCOL_CONFIG)
+        config.interInstanceProtocol()
     );
     this.isEligibleForMasterElector = config.getBoolean(SchemaRegistryConfig.MASTER_ELIGIBILITY);
     this.myIdentity = new SchemaRegistryIdentity(host, schemeAndPort.port,
@@ -135,6 +136,7 @@ public class KafkaSchemaRegistry implements SchemaRegistry, MasterAwareSchemaReg
     this.defaultCompatibilityLevel = config.compatibilityType();
     this.guidToSchemaKey = new HashMap<Integer, SchemaKey>();
     this.schemaHashToGuid = new HashMap<MD5, SchemaIdAndSubjects>();
+    this.guidToDeletedSchemaKeys = new HashMap<>();
     Store store = new InMemoryStore<SchemaRegistryKey, SchemaRegistryValue>();
     kafkaStore =
         new KafkaStore<SchemaRegistryKey, SchemaRegistryValue>(
@@ -152,11 +154,13 @@ public class KafkaSchemaRegistry implements SchemaRegistry, MasterAwareSchemaReg
     reporters.add(new JmxReporter(jmxPrefix));
     this.metrics = new Metrics(metricConfig, reporters, new SystemTime());
     this.masterNodeSensor = metrics.sensor("master-slave-role");
+
+    Map<String, String> configuredTags = config.getMap(RestConfig.METRICS_TAGS_CONFIG);
     MetricName
         m = new MetricName("master-slave-role", "master-slave-role",
                            "1.0 indicates the node is the active master in the cluster and is the"
                            + " node where all register schema and config update requests are "
-                           + "served.");
+                           + "served.", configuredTags);
     this.masterNodeSensor.add(m, new Gauge());
   }
 

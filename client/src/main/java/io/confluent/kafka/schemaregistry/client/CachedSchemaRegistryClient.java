@@ -26,13 +26,13 @@ import java.util.List;
 import java.util.Map;
 
 import io.confluent.kafka.schemaregistry.client.rest.RestService;
+import io.confluent.kafka.schemaregistry.client.rest.Versions;
 import io.confluent.kafka.schemaregistry.client.rest.entities.Config;
 import io.confluent.kafka.schemaregistry.client.rest.entities.SchemaString;
 import io.confluent.kafka.schemaregistry.client.rest.entities.requests.ConfigUpdateRequest;
 import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
 import io.confluent.kafka.schemaregistry.client.security.basicauth.BasicAuthCredentialProvider;
 import io.confluent.kafka.schemaregistry.client.security.basicauth.BasicAuthCredentialProviderFactory;
-import io.confluent.kafka.schemaregistry.client.security.basicauth.BasicAuthCredentialSource;
 
 public class CachedSchemaRegistryClient implements SchemaRegistryClient {
 
@@ -41,6 +41,13 @@ public class CachedSchemaRegistryClient implements SchemaRegistryClient {
   private final Map<String, Map<Schema, Integer>> schemaCache;
   private final Map<String, Map<Integer, Schema>> idCache;
   private final Map<String, Map<Schema, Integer>> versionCache;
+
+  public static final Map<String, String> DEFAULT_REQUEST_PROPERTIES;
+
+  static {
+    DEFAULT_REQUEST_PROPERTIES = new HashMap<String, String>();
+    DEFAULT_REQUEST_PROPERTIES.put("Content-Type", Versions.SCHEMA_REGISTRY_V1_JSON_WEIGHTED);
+  }
 
   public CachedSchemaRegistryClient(String baseUrl, int identityMapCapacity) {
     this(new RestService(baseUrl), identityMapCapacity);
@@ -94,7 +101,7 @@ public class CachedSchemaRegistryClient implements SchemaRegistryClient {
 
         BasicAuthCredentialProvider basicAuthCredentialProvider =
             BasicAuthCredentialProviderFactory.getBasicAuthCredentialProvider(
-                BasicAuthCredentialSource.valueOf(credentialSourceConfig),
+                credentialSourceConfig,
                 configs);
 
         restService.setBasicAuthCredentialProvider(basicAuthCredentialProvider);
@@ -259,6 +266,36 @@ public class CachedSchemaRegistryClient implements SchemaRegistryClient {
       idCache.get(null).put(id, schema);
       return id;
     }
+  }
+
+  @Override
+  public List<Integer> deleteSubject(String subject) throws IOException, RestClientException {
+    return deleteSubject(DEFAULT_REQUEST_PROPERTIES, subject);
+  }
+
+  @Override
+  public List<Integer> deleteSubject(Map<String, String> requestProperties, String subject)
+      throws IOException, RestClientException {
+    versionCache.remove(subject);
+    idCache.remove(subject);
+    schemaCache.remove(subject);
+    return restService.deleteSubject(requestProperties, subject);
+  }
+
+  @Override
+  public Integer deleteSchemaVersion(String subject, String version)
+      throws IOException, RestClientException {
+    return deleteSchemaVersion(DEFAULT_REQUEST_PROPERTIES, subject, version);
+  }
+
+  @Override
+  public Integer deleteSchemaVersion(
+      Map<String, String> requestProperties,
+      String subject,
+      String version)
+      throws IOException, RestClientException {
+    versionCache.get(subject).values().remove(Integer.valueOf(version));
+    return restService.deleteSchemaVersion(requestProperties, subject, version);
   }
 
   @Override
